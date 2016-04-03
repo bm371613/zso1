@@ -1,3 +1,4 @@
+#include <asm/ldt.h>
 #include <elf.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -126,6 +127,14 @@ void map_files(FILE *f, long nt_file_desc_offset) {
 		entry_offset += sizeof(entry);
 		fname_offset += strlen(fname) + 1;
 	}
+	printf("\n");
+}
+
+void set_tls(FILE *f, long nt_tls_desc_offset) {
+	struct user_desc ud;
+
+	read_at(f, nt_tls_desc_offset, &ud, sizeof(ud), 1);
+	printf("TLS %u: 0x%x %d\n\n", ud.entry_number, ud.base_addr, ud.limit);
 }
 
 
@@ -134,20 +143,25 @@ int main(int argc, char *argv[]) {
 	notes_desc_offsets_t nd_offsets;
 	struct elf_prstatus prstatus;
 
+	/* open file */
 	if (argc != 2) error("Supply exactly one argument (core file name)");
 	f = fopen(argv[1], "r");
 	if (f == NULL) error("Failed to open the file");
 
+	/* verify file, extract data */
 	verify_header(f);
 	for_each_segment(f, PT_NOTE, &nd_offsets, gather_relevant_notes);
-	for_each_segment(f, PT_LOAD, NULL, process_load_segment);
-
-	map_files(f, nd_offsets.file);
-
 	read_at(f, nd_offsets.prstatus, &prstatus, sizeof(prstatus_t), 1);
+
+	/* processing with file opened */
+	for_each_segment(f, PT_LOAD, NULL, process_load_segment);
+	map_files(f, nd_offsets.file);
+	set_tls(f, nd_offsets.tls);
+
+	/* close file */
 	fclose(f);
 
-	/* pr_reg is an array of registered order as in user_regs_struct */
+	/* processing with file closed */
 	printf("EAX: %lu\n", prstatus.pr_reg[6]);
 	printf("EBX: %lu\n", prstatus.pr_reg[0]);
 	printf("ECX: %lu\n", prstatus.pr_reg[1]);
@@ -158,6 +172,6 @@ int main(int argc, char *argv[]) {
 	printf("ESP: 0x%lx\n", prstatus.pr_reg[15]);
 	printf("EIP: 0x%lx\n", prstatus.pr_reg[12]);
 	printf("EFLAGS: %lu\n", prstatus.pr_reg[14]);
-	// TODO
+	// TODO (see user_regs struct)
 
 }

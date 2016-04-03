@@ -1,10 +1,8 @@
 #include <elf.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
+#include <sys/procfs.h>
 
 #define ALIGN4(value) (((value) + 3) & (~3) )
 #define PT_ANY -1
@@ -13,7 +11,7 @@ typedef struct {
 	long prstatus;
 	long file;
 	long tls;
-} notes_desc_offsets;
+} notes_desc_offsets_t;
 
 void error(char *msg) {
 	fprintf(stderr, "%s\n", msg);
@@ -59,7 +57,7 @@ void for_each_segment(FILE *f, Elf32_Word type, void *result,
 	}
 }
 
-void load_load_segment(FILE *f, Elf32_Phdr *phdr, void *result) {
+void process_load_segment(FILE *f, Elf32_Phdr *phdr, void *result) {
 	// TODO
 	printf("Load segment\n");
 	printf("p_offset\t%d\n", phdr->p_offset);
@@ -74,7 +72,7 @@ void load_load_segment(FILE *f, Elf32_Phdr *phdr, void *result) {
 void gather_relevant_notes(FILE *f, Elf32_Phdr *phdr, void *result) {
 	int note_hdr[3]; /* note header: name size, desc size, type */
 	long desc_offset, offset;
-	notes_desc_offsets *desc_offsets = result;
+	notes_desc_offsets_t *desc_offsets = result;
 
 	offset = phdr->p_offset;
 	while (offset < phdr->p_offset + phdr->p_filesz) {
@@ -119,7 +117,7 @@ void map_files(FILE *f, long nt_file_desc_offset) {
 	for (i = 0; i < hdr[0]; ++i) {
 		read_at(f, entry_offset, entry, sizeof(entry), 1);
 		read_at(f, fname_offset, fname, 1, sizeof(fname));
-		fname[255] = '\0';
+		fname[sizeof(fname) - 1] = '\0';
 
 		printf("%10lx %10lx %10lu %s\n",
 				entry[0], entry[1], entry[2], fname);
@@ -133,7 +131,8 @@ void map_files(FILE *f, long nt_file_desc_offset) {
 
 int main(int argc, char *argv[]) {
 	FILE *f;
-	notes_desc_offsets nd_offsets;
+	notes_desc_offsets_t nd_offsets;
+	struct elf_prstatus prstatus;
 
 	if (argc != 2) error("Supply exactly one argument (core file name)");
 	f = fopen(argv[1], "r");
@@ -141,9 +140,24 @@ int main(int argc, char *argv[]) {
 
 	verify_header(f);
 	for_each_segment(f, PT_NOTE, &nd_offsets, gather_relevant_notes);
-	for_each_segment(f, PT_LOAD, NULL, load_load_segment);
+	for_each_segment(f, PT_LOAD, NULL, process_load_segment);
 
 	map_files(f, nd_offsets.file);
 
+	read_at(f, nd_offsets.prstatus, &prstatus, sizeof(prstatus_t), 1);
 	fclose(f);
+
+	/* pr_reg is an array of registered order as in user_regs_struct */
+	printf("EAX: %lu\n", prstatus.pr_reg[6]);
+	printf("EBX: %lu\n", prstatus.pr_reg[0]);
+	printf("ECX: %lu\n", prstatus.pr_reg[1]);
+	printf("EDX: %lu\n", prstatus.pr_reg[2]);
+	printf("ESI: %lu\n", prstatus.pr_reg[3]);
+	printf("EDI: %lu\n", prstatus.pr_reg[4]);
+	printf("EBP: 0x%lx\n", prstatus.pr_reg[5]);
+	printf("ESP: 0x%lx\n", prstatus.pr_reg[15]);
+	printf("EIP: 0x%lx\n", prstatus.pr_reg[12]);
+	printf("EFLAGS: %lu\n", prstatus.pr_reg[14]);
+	// TODO
+
 }

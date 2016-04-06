@@ -4,9 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/procfs.h>
+#include <ucontext.h>
 
 #define ALIGN4(value) (((value) + 3) & (~3) )
 #define PT_ANY -1
+
+char stack[16384];
+ucontext_t uctx;
 
 typedef struct {
 	long prstatus;
@@ -15,7 +19,8 @@ typedef struct {
 } notes_desc_offsets_t;
 
 void error(char *msg) {
-	fprintf(stderr, "%s\n", msg);
+	write(2, msg, strlen(msg));
+	write(2, "\n", 1);
 	exit(1);
 }
 
@@ -60,14 +65,14 @@ void for_each_segment(FILE *f, Elf32_Word type, void *result,
 
 void process_load_segment(FILE *f, Elf32_Phdr *phdr, void *result) {
 	// TODO
-	printf("Load segment\n");
-	printf("p_offset\t%d\n", phdr->p_offset);
-	printf("p_vaddr\t%d\n", phdr->p_vaddr);
-	printf("p_filesz\t%d\n", phdr->p_filesz);
-	printf("p_memsz\t%d\n", phdr->p_memsz);
-	printf("p_flags\t%d\n", phdr->p_flags);
-	printf("p_align\t%d\n", phdr->p_align);
-	printf("\n");
+	/*printf("Load segment\n");*/
+	/*printf("p_offset\t%d\n", phdr->p_offset);*/
+	/*printf("p_vaddr\t0x%x\n", phdr->p_vaddr);*/
+	/*printf("p_filesz\t%d\n", phdr->p_filesz);*/
+	/*printf("p_memsz\t%d\n", phdr->p_memsz);*/
+	/*printf("p_flags\t%d\n", phdr->p_flags);*/
+	/*printf("p_align\t%d\n", phdr->p_align);*/
+	/*printf("\n");*/
 }
 
 void gather_relevant_notes(FILE *f, Elf32_Phdr *phdr, void *result) {
@@ -120,32 +125,31 @@ void map_files(FILE *f, long nt_file_desc_offset) {
 		read_at(f, fname_offset, fname, 1, sizeof(fname));
 		fname[sizeof(fname) - 1] = '\0';
 
-		printf("%10lx %10lx %10lu %s\n",
-				entry[0], entry[1], entry[2], fname);
+		/*printf("%10lx %10lx %10lu %s\n",*/
+				/*entry[0], entry[1], entry[2], fname);*/
 		// TODO
 
 		entry_offset += sizeof(entry);
 		fname_offset += strlen(fname) + 1;
 	}
-	printf("\n");
+	/*printf("\n");*/
 }
 
 void set_tls(FILE *f, long nt_tls_desc_offset) {
 	struct user_desc ud;
 
 	read_at(f, nt_tls_desc_offset, &ud, sizeof(ud), 1);
-	printf("TLS %u: 0x%x %d\n\n", ud.entry_number, ud.base_addr, ud.limit);
+	/*printf("TLS %u: 0x%x %d\n\n", ud.entry_number, ud.base_addr, ud.limit);*/
 }
 
 
-int main(int argc, char *argv[]) {
+void do_raise(char *filename) {
 	FILE *f;
 	notes_desc_offsets_t nd_offsets;
 	struct elf_prstatus prstatus;
 
 	/* open file */
-	if (argc != 2) error("Supply exactly one argument (core file name)");
-	f = fopen(argv[1], "r");
+	f = fopen(filename, "r");
 	if (f == NULL) error("Failed to open the file");
 
 	/* verify file, extract data */
@@ -162,16 +166,28 @@ int main(int argc, char *argv[]) {
 	fclose(f);
 
 	/* processing with file closed */
-	printf("EAX: %lu\n", prstatus.pr_reg[6]);
-	printf("EBX: %lu\n", prstatus.pr_reg[0]);
-	printf("ECX: %lu\n", prstatus.pr_reg[1]);
-	printf("EDX: %lu\n", prstatus.pr_reg[2]);
-	printf("ESI: %lu\n", prstatus.pr_reg[3]);
-	printf("EDI: %lu\n", prstatus.pr_reg[4]);
-	printf("EBP: 0x%lx\n", prstatus.pr_reg[5]);
-	printf("ESP: 0x%lx\n", prstatus.pr_reg[15]);
-	printf("EIP: 0x%lx\n", prstatus.pr_reg[12]);
-	printf("EFLAGS: %lu\n", prstatus.pr_reg[14]);
+	/*printf("EAX: %lu\n", prstatus.pr_reg[6]);*/
+	/*printf("EBX: %lu\n", prstatus.pr_reg[0]);*/
+	/*printf("ECX: %lu\n", prstatus.pr_reg[1]);*/
+	/*printf("EDX: %lu\n", prstatus.pr_reg[2]);*/
+	/*printf("ESI: %lu\n", prstatus.pr_reg[3]);*/
+	/*printf("EDI: %lu\n", prstatus.pr_reg[4]);*/
+	/*printf("EBP: 0x%lx\n", prstatus.pr_reg[5]);*/
+	/*printf("ESP: 0x%lx\n", prstatus.pr_reg[15]);*/
+	/*printf("EIP: 0x%lx\n", prstatus.pr_reg[12]);*/
+	/*printf("EFLAGS: %lu\n", prstatus.pr_reg[14]);*/
 	// TODO (see user_regs struct)
+}
 
+
+int main(int argc, char *argv[]) {
+	if (argc != 2) error("Supply exactly one argument (core file name)");
+
+	if (getcontext(&uctx) == -1)
+		error("getcontext failed");
+	uctx.uc_stack.ss_sp = stack;
+	uctx.uc_stack.ss_size = sizeof(stack);
+	uctx.uc_link = NULL;
+	makecontext(&uctx, (void (*)(void)) do_raise, 1, argv[1]);
+	setcontext(&uctx);
 }

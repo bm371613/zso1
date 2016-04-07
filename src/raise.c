@@ -1,8 +1,10 @@
 #include <asm/ldt.h>
 #include <elf.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/procfs.h>
 #include <ucontext.h>
 
@@ -10,7 +12,8 @@
 #define FILENAME_SIZE 256
 #define NOTE_FILE_ENTRY_SIZE (3 * sizeof(unsigned long))
 
-/* stack and context */
+/* context switching */
+char filename[FILENAME_SIZE];
 char stack[16384];
 ucontext_t uctx;
 
@@ -26,7 +29,7 @@ struct {
 struct note_file_file {
 	unsigned long start;
 	unsigned long end;
-	unsigned long file_offset;
+	unsigned long pgoff;
 	char filename[FILENAME_SIZE];
 } note_file_files[256];
 
@@ -139,30 +142,57 @@ void process_segment_note(FILE *f, Elf32_Phdr *phdr) {
 }
 
 void process_segment_load(FILE *f, Elf32_Phdr *phdr) {
-	int i;
+	int i, fd, prot;
 	struct note_file_file *file = NULL;
+	void *mem;
 
 	/* check if there is a  backing file */
 	for (i = 0; i < note_file_header.count; ++i)
 		if (phdr->p_vaddr == note_file_files[i].start)
 			file = &note_file_files[i];
 
-	// TODO
+	/* map memory */
+	if (file == NULL) {
+		mem = mmap((void*) phdr->p_vaddr, phdr->p_memsz, PROT_WRITE,
+				MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+	} else {
+		fd = open(file->filename, O_RDONLY);
+		if (fd == -1)
+			error("open mapped file");
+		mem = mmap((void*) phdr->p_vaddr, phdr->p_memsz, PROT_WRITE,
+				MAP_PRIVATE,
+				fd, file->pgoff * note_file_header.page_size);
+		close(fd);
+	}
 
-	printf("Load segment\n");
-	if (file != NULL)
-		printf("%s\n", file->filename);
-	printf("p_offset\t%d\n", phdr->p_offset);
-	printf("p_vaddr\t0x%x\n", phdr->p_vaddr);
-	printf("p_filesz\t%d\n", phdr->p_filesz);
-	printf("p_memsz\t%d\n", phdr->p_memsz);
-	printf("p_flags\t%d\n", phdr->p_flags);
-	printf("p_align\t%d\n", phdr->p_align);
-	printf("\n");
+	if (mem == MAP_FAILED)
+		error("mmap failed");
+
+	write(1, " mmap ok\n", 9);  // FIXME
+
+	if (mem != (void*) phdr->p_vaddr)
+		error("failed to map at requested address");
+
+	/* copy data */
+	read_at(f, phdr->p_offset, mem, 1, phdr->p_filesz);
+
+	/* protect memory */
+	prot = PROT_NONE;
+	if (phdr->p_flags & PF_R) prot = prot | PROT_READ;
+	if (phdr->p_flags & PF_W) prot = prot | PROT_WRITE;
+	if (phdr->p_flags & PF_X) prot = prot | PROT_EXEC;
+	if (mprotect(mem, phdr->p_memsz, prot) == -1)
+		error("mprotect");
 }
 
-void do_raise(char *filename) {
+void unmap_old_stack() {
+	// TODO
+}
+
+void do_raise() {
 	FILE *f;
+
+	unmap_old_stack();
 
 	/* open file */
 	f = fopen(filename, "r");
@@ -181,31 +211,32 @@ void do_raise(char *filename) {
 	// TODO
 
 	/* tls */
-	printf("TLS %u: 0x%x %d\n\n", user_desc.entry_number,
-		user_desc.base_addr, user_desc.limit);
+	/*printf("TLS %u: 0x%x %d\n\n", user_desc.entry_number,*/
+		/*user_desc.base_addr, user_desc.limit);*/
 
 	/* prstatus (see user_regs struct) */
-	printf("EAX: %lu\n", prstatus.pr_reg[6]);
-	printf("EBX: %lu\n", prstatus.pr_reg[0]);
-	printf("ECX: %lu\n", prstatus.pr_reg[1]);
-	printf("EDX: %lu\n", prstatus.pr_reg[2]);
-	printf("ESI: %lu\n", prstatus.pr_reg[3]);
-	printf("EDI: %lu\n", prstatus.pr_reg[4]);
-	printf("EBP: 0x%lx\n", prstatus.pr_reg[5]);
-	printf("ESP: 0x%lx\n", prstatus.pr_reg[15]);
-	printf("EIP: 0x%lx\n", prstatus.pr_reg[12]);
-	printf("EFLAGS: %lu\n", prstatus.pr_reg[14]);
+	/*printf("EAX: %lu\n", prstatus.pr_reg[6]);*/
+	/*printf("EBX: %lu\n", prstatus.pr_reg[0]);*/
+	/*printf("ECX: %lu\n", prstatus.pr_reg[1]);*/
+	/*printf("EDX: %lu\n", prstatus.pr_reg[2]);*/
+	/*printf("ESI: %lu\n", prstatus.pr_reg[3]);*/
+	/*printf("EDI: %lu\n", prstatus.pr_reg[4]);*/
+	/*printf("EBP: 0x%lx\n", prstatus.pr_reg[5]);*/
+	/*printf("ESP: 0x%lx\n", prstatus.pr_reg[15]);*/
+	/*printf("EIP: 0x%lx\n", prstatus.pr_reg[12]);*/
+	/*printf("EFLAGS: %lu\n", prstatus.pr_reg[14]);*/
 }
 
 
 int main(int argc, char *argv[]) {
 	if (argc != 2) error("Supply exactly one argument (core file name)");
+	strcpy(filename, argv[1]);
 
 	if (getcontext(&uctx) == -1)
 		error("getcontext failed");
 	uctx.uc_stack.ss_sp = stack;
 	uctx.uc_stack.ss_size = sizeof(stack);
 	uctx.uc_link = NULL;
-	makecontext(&uctx, (void (*)(void)) do_raise, 1, argv[1]);
+	makecontext(&uctx, (void (*)(void)) do_raise, 0);
 	setcontext(&uctx);
 }

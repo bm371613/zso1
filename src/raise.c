@@ -141,13 +141,13 @@ void process_segment_load(Elf32_Phdr *phdr) {
 	/* map memory */
 	if (b_file == NULL) {
 		mem = mmap((void*) phdr->p_vaddr, phdr->p_memsz, PROT_WRITE,
-				MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+				MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, 0, 0);
 	} else {
 		b_fd = open(b_file->filename, O_RDONLY);
 		if (b_fd == -1)
 			error("open mapped file");
 		mem = mmap((void*) phdr->p_vaddr, phdr->p_memsz, PROT_WRITE,
-				MAP_PRIVATE,
+				MAP_PRIVATE | MAP_FIXED,
 				b_fd,
 				b_file->pgoff * note_file_header.page_size);
 		close(b_fd);
@@ -174,6 +174,9 @@ void process_segment_load(Elf32_Phdr *phdr) {
 }
 
 void do_raise() {
+	/* unmap old stack */
+	munmap((void*) 0x8000000, 0xc0000000 - 0x8000000);
+
 	/* open file */
 	fd = open(filename, O_RDONLY);
 	if (fd < 0) error("Failed to open the file");

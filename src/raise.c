@@ -37,6 +37,11 @@ struct note_file_file {
 	char filename[FILENAME_SIZE];
 } note_file_files[256];
 
+/* assembly code interface */
+unsigned long eax, ebx, ecx, edx, esi, edi, ebp, esp, eip, eflags;
+
+void set_registers();
+
 /* functions */
 
 void error(char *msg) {
@@ -202,22 +207,24 @@ void do_raise() {
 	/* close file */
 	close(fd);
 
+	/* prepare registers */
+	eax = prstatus.pr_reg[6];
+	ebx = prstatus.pr_reg[0];
+	ecx = prstatus.pr_reg[1];
+	edx = prstatus.pr_reg[2];
+	esi = prstatus.pr_reg[3];
+	edi = prstatus.pr_reg[4];
+	ebp = prstatus.pr_reg[5];
+	esp = prstatus.pr_reg[15];
+	eip = prstatus.pr_reg[12];
+	eflags = prstatus.pr_reg[14];
+
 	/* tls */
 	if (syscall(SYS_set_thread_area, &user_desc) < 0)
 		error("tls");
 
-
-	/* prstatus (see user_regs struct) */
-	/*printf("EAX: %lu\n", prstatus.pr_reg[6]);*/
-	/*printf("EBX: %lu\n", prstatus.pr_reg[0]);*/
-	/*printf("ECX: %lu\n", prstatus.pr_reg[1]);*/
-	/*printf("EDX: %lu\n", prstatus.pr_reg[2]);*/
-	/*printf("ESI: %lu\n", prstatus.pr_reg[3]);*/
-	/*printf("EDI: %lu\n", prstatus.pr_reg[4]);*/
-	/*printf("EBP: 0x%lx\n", prstatus.pr_reg[5]);*/
-	/*printf("ESP: 0x%lx\n", prstatus.pr_reg[15]);*/
-	/*printf("EIP: 0x%lx\n", prstatus.pr_reg[12]);*/
-	/*printf("EFLAGS: %lu\n", prstatus.pr_reg[14]);*/
+	/* set registers */
+	set_registers();
 }
 
 

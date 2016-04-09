@@ -1,10 +1,12 @@
 #include <asm/ldt.h>
 #include <elf.h>
 #include <fcntl.h>
+#include <linux/unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/procfs.h>
+#include <sys/syscall.h>
 #include <ucontext.h>
 
 #define ALIGN4(value) (((value) + 3) & (~3) )
@@ -156,8 +158,6 @@ void process_segment_load(Elf32_Phdr *phdr) {
 	if (mem == MAP_FAILED)
 		error("mmap failed");
 
-	write(1, " mmap ok\n", 9);  // FIXME
-
 	if (mem != (void*) phdr->p_vaddr)
 		error("failed to map at requested address");
 
@@ -202,12 +202,10 @@ void do_raise() {
 	/* close file */
 	close(fd);
 
-	// TODO
-
 	/* tls */
-	/*printf("TLS %u: 0x%x %d\n\n", user_desc.entry_number,*/
+	if (syscall(SYS_set_thread_area, &user_desc) < 0)
+		error("tls");
 
-		/*user_desc.base_addr, user_desc.limit);*/
 
 	/* prstatus (see user_regs struct) */
 	/*printf("EAX: %lu\n", prstatus.pr_reg[6]);*/

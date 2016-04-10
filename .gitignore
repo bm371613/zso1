@@ -1,0 +1,6 @@
+raise
+core*
+*.o
+tests/
+.gdb_history
+peda-session*

@@ -1,0 +1,17 @@
+Rozwiązanie składa się z dwóch plików źródłowych:
+    - src/raise.c
+    - src/set_registers.s
+oraz pliku Makefile.
+
+Do skompilowania programu raise wystarczy polecenie make.
+
+Program zdefiniowany ładowany poniżej standardowego adresu. Na początku kopiuje
+własny stos tak, żeby też znajdował się poniżej standardowego adresu ładowania
+programu, zmienia kontekst do kopii stosu i zwalnia stary stos. Następnie
+weryfikuje plik core, spisuje istotne informacje z nagłówka programu PT_NOTE i
+ładuje do własnej pamięci zawartość nagłówków programu PT_LOAD. Dalej
+przepisuje zawartości rejestrów odczytane ze struktury NT_PRSTATUS do
+globalnych zmiennych. Na koniec odtwarza adres segmentu TLS i skacze do kodu
+z src/set_registers.s, skąd już nie wróci. Kod w src/set_registers.s ustawia
+zawartość rejestrów z te znalezione w globalnych zmiennych z src/raise.c. Jako
+ostatni odtwarza wskaźnik instrukcji, skacząc do kodu wskrzeszanego programu.

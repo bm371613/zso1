@@ -66,7 +66,7 @@ int read_at(long offset, void *ptr, size_t size) {
 	}
 }
 
-void for_each_segment(Elf32_Word type, void (*func)(Elf32_Phdr*)) {
+void for_each_program_header(Elf32_Word type, void (*func)(Elf32_Phdr*)) {
 	int i;
 	Elf32_Phdr phdr;
 
@@ -100,7 +100,7 @@ void process_note_file(long note_file_desc_offset) {
 	}
 }
 
-void process_segment_note(Elf32_Phdr *phdr) {
+void process_program_header_note(Elf32_Phdr *phdr) {
 	long desc_offset, offset;
 	struct {
 		int name_size;
@@ -146,7 +146,7 @@ void process_segment_note(Elf32_Phdr *phdr) {
 	}
 }
 
-void process_segment_load(Elf32_Phdr *phdr) {
+void process_program_header_load(Elf32_Phdr *phdr) {
 	int i, b_fd, prot;
 	struct note_file_file *b_file = NULL;
 	void *mem;
@@ -215,12 +215,12 @@ void do_raise() {
 		error("Bad version.");
 
 	/* extract relevant info from notes */
-	for_each_segment(PT_NOTE, process_segment_note);
+	for_each_program_header(PT_NOTE, process_program_header_note);
 	if ((notes_found & NOTE_FOUND_ALL_RELEVANT) != NOTE_FOUND_ALL_RELEVANT)
 		error("Relevant notes missing.");
 
-	/* load segments */
-	for_each_segment(PT_LOAD, process_segment_load);
+	/* set up memory */
+	for_each_program_header(PT_LOAD, process_program_header_load);
 
 	/* close file */
 	close(fd);
@@ -243,6 +243,7 @@ void do_raise() {
 
 	/* set registers */
 	set_registers();
+	error("unreachable");
 }
 
 

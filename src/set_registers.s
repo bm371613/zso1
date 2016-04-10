@@ -2,7 +2,7 @@
 
     .text
 set_registers:
-    push eflags
+    push (eflags)
     popf
     mov (eax), %eax
     mov (ebx), %ebx
@@ -14,4 +14,3 @@ set_registers:
     mov (esp), %esp
     push (eip)
     ret
-

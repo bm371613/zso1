@@ -1,6 +1,0 @@
-#!/bin/sh
-
-. ./test_lib.sh
-core=$(./wrapper ./prog_bigmalloc)
-[ -n "$core" ] || exit 1
-./raise $core

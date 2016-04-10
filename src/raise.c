@@ -13,15 +13,18 @@
 #define FILENAME_SIZE 256
 #define NOTE_FILE_ENTRY_SIZE (3 * sizeof(unsigned long))
 
+char filename[FILENAME_SIZE], stack[16384];
 int fd;
 Elf32_Ehdr hdr;
 
-/* context switching */
-char filename[FILENAME_SIZE];
-char stack[16384];
-ucontext_t uctx;
-
 /* note data */
+#define NOTE_FOUND_PRSTATUS 1
+#define NOTE_FOUND_FILE 2
+#define NOTE_FOUND_386_TLS 4
+#define NOTE_FOUND_ALL_RELEVANT \
+	(NOTE_FOUND_PRSTATUS | NOTE_FOUND_FILE | NOTE_FOUND_386_TLS)
+int notes_found = 0;
+
 struct elf_prstatus prstatus;
 struct user_desc user_desc;
 
@@ -37,13 +40,12 @@ struct note_file_file {
 	char filename[FILENAME_SIZE];
 } note_file_files[256];
 
-/* assembly code interface */
+/* assembly interface */
 unsigned long eax, ebx, ecx, edx, esi, edi, ebp, esp, eip, eflags;
 
 void set_registers();
 
 /* functions */
-
 void error(char *msg) {
 	write(2, msg, strlen(msg));
 	write(2, "\n", 1);
@@ -66,9 +68,9 @@ int read_at(long offset, void *ptr, size_t size) {
 
 void for_each_segment(Elf32_Word type, void (*func)(Elf32_Phdr*)) {
 	int i;
+	Elf32_Phdr phdr;
 
 	for (i = 0; i < hdr.e_phnum; ++i) {
-		Elf32_Phdr phdr;
 		read_at(hdr.e_phoff + i * hdr.e_phentsize, &phdr,
 				sizeof(Elf32_Phdr));
 		if (phdr.p_type == type)
@@ -123,12 +125,21 @@ void process_segment_note(Elf32_Phdr *phdr) {
 
 		switch (note_header.type) {
 		case NT_PRSTATUS:
+			if (notes_found & NOTE_FOUND_PRSTATUS)
+				error("Multiple NT_PRSTATUS notes.");
+			notes_found |= NOTE_FOUND_PRSTATUS;
 			read_at(desc_offset, &prstatus, sizeof(prstatus));
 			break;
 		case NT_FILE:
+			if (notes_found & NOTE_FOUND_FILE)
+				error("Multiple NT_FILE notes.");
+			notes_found |= NOTE_FOUND_FILE;
 			process_note_file(desc_offset);
 			break;
 		case NT_386_TLS:
+			if (notes_found & NOTE_FOUND_386_TLS)
+				error("Multiple NT_386_TLS notes.");
+			notes_found |= NOTE_FOUND_386_TLS;
 			read_at(desc_offset, &user_desc, sizeof(user_desc));
 			break;
 		}
@@ -161,19 +172,22 @@ void process_segment_load(Elf32_Phdr *phdr) {
 	}
 
 	if (mem == MAP_FAILED)
-		error("mmap failed");
+		error("mmap");
 
 	if (mem != (void*) phdr->p_vaddr)
-		error("failed to map at requested address");
+		error("mmap at requested address");
 
 	/* copy data */
 	read_at(phdr->p_offset, mem, phdr->p_filesz);
 
 	/* protect memory */
 	prot = PROT_NONE;
-	if (phdr->p_flags & PF_R) prot = prot | PROT_READ;
-	if (phdr->p_flags & PF_W) prot = prot | PROT_WRITE;
-	if (phdr->p_flags & PF_X) prot = prot | PROT_EXEC;
+	if (phdr->p_flags & PF_R)
+		prot = prot | PROT_READ;
+	if (phdr->p_flags & PF_W)
+		prot = prot | PROT_WRITE;
+	if (phdr->p_flags & PF_X)
+		prot = prot | PROT_EXEC;
 	if (mprotect(mem, phdr->p_memsz, prot) == -1)
 		error("mprotect");
 }
@@ -184,22 +198,26 @@ void do_raise() {
 
 	/* open file */
 	fd = open(filename, O_RDONLY);
-	if (fd < 0) error("Failed to open the file");
+	if (fd < 0) error("Failed to open the file.");
 
 	/* read and verify header */
-	if (read_at(0, &hdr, sizeof(Elf32_Ehdr)) != sizeof(Elf32_Ehdr))
-		error("Failed to read ELF header");
-	if (hdr.e_ident[EI_MAG0] != ELFMAG0
+	if (read_at(0, &hdr, sizeof(Elf32_Ehdr)) != sizeof(Elf32_Ehdr)
+			|| hdr.e_ident[EI_MAG0] != ELFMAG0
 			|| hdr.e_ident[EI_MAG1] != ELFMAG1
 			|| hdr.e_ident[EI_MAG2] != ELFMAG2
 			|| hdr.e_ident[EI_MAG3] != ELFMAG3)
-		error("Not an ELF");
-	if (hdr.e_type != ET_CORE) error("Not a core ELF");
-	if (hdr.e_machine != EM_386) error("Bad machine");
-	if (hdr.e_version != EV_CURRENT) error("Bad version");
+		error("Not an ELF.");
+	if (hdr.e_type != ET_CORE)
+		error("Not a core ELF.");
+	if (hdr.e_machine != EM_386)
+		error("Bad machine.");
+	if (hdr.e_version != EV_CURRENT)
+		error("Bad version.");
 
-	/* extract relvent info from notes */
+	/* extract relevant info from notes */
 	for_each_segment(PT_NOTE, process_segment_note);
+	if ((notes_found & NOTE_FOUND_ALL_RELEVANT) != NOTE_FOUND_ALL_RELEVANT)
+		error("Relevant notes missing.");
 
 	/* load segments */
 	for_each_segment(PT_LOAD, process_segment_load);
@@ -229,11 +247,14 @@ void do_raise() {
 
 
 int main(int argc, char *argv[]) {
-	if (argc != 2) error("Supply exactly one argument (core file name)");
+	ucontext_t uctx;
+
+	if (argc != 2)
+		error("Supply exactly one argument (core file name).");
 	strcpy(filename, argv[1]);
 
 	if (getcontext(&uctx) == -1)
-		error("getcontext failed");
+		error("getcontext");
 	uctx.uc_stack.ss_sp = stack;
 	uctx.uc_stack.ss_size = sizeof(stack);
 	uctx.uc_link = NULL;

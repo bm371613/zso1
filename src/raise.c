@@ -18,9 +18,9 @@ int fd;
 Elf32_Ehdr hdr;
 
 /* note data */
-#define NOTE_FOUND_PRSTATUS 1
-#define NOTE_FOUND_FILE 2
-#define NOTE_FOUND_386_TLS 4
+#define NOTE_FOUND_PRSTATUS 	(1 << 0)
+#define NOTE_FOUND_FILE 	(1 << 1)
+#define NOTE_FOUND_386_TLS 	(1 << 2)
 #define NOTE_FOUND_ALL_RELEVANT \
 	(NOTE_FOUND_PRSTATUS | NOTE_FOUND_FILE | NOTE_FOUND_386_TLS)
 int notes_found = 0;
@@ -181,7 +181,9 @@ void process_program_header_load(Elf32_Phdr *phdr) {
 	read_at(phdr->p_offset, mem, phdr->p_filesz);
 
 	/* protect memory */
-	prot = PROT_NONE;
+	prot = PROT_NONE
+		| (phdr->p_flags & PF_MASKOS)
+		| (phdr->p_flags & PF_MASKPROC);
 	if (phdr->p_flags & PF_R)
 		prot = prot | PROT_READ;
 	if (phdr->p_flags & PF_W)
